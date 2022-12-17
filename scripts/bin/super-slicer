@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}" )" && pwd)"
+GIT_ROOT="$(cd "${SCRIPT_DIR}" && git rev-parse --show-toplevel)"
+export SS_HOME="/Applications/SuperSlicer.app"
+SS_DATA_HOME="$(printf '%s/Library/Application\ Support/SuperSlicer' "${HOME}")"
+export SS_DATA_HOME
+function ls-ss-filament {
+    find "${SS_DATA_HOME}/filament" -type f -name \*.ini
+}
+function ls-ss-printer {
+    find "${SS_DATA_HOME}/printer" -type f -name \*.ini
+}
+function ls-ss-print {
+    find "${SS_DATA_HOME}/print" -type f -name \*.ini
+}
+export VORON_ABS_SETTINGS=(
+        "--load ${GIT_ROOT}/slicer/profiles/printer/printer_voron_300_dragon_sf.ini"
+        "--load ${GIT_ROOT}/slicer/profiles/filament/filament_kvp_abs_voron_dsf.ini"
+        "--load ${GIT_ROOT}/slicer/profiles/print/print_0.2mm_0.4mm_nozzle_v2_voron-print.ini"
+    )
+export VORON_CONFIG_PRINTER=/Users/arrongreen/dev/3dprinters/slicer/printer_voron_300_dragon_sf.ini
+export VORON_CONFIG_PRINT=/Users/arrongreen/dev/3dprinters/slicer/print_0.2mm_0.4mm_nozzle_v2_voron-print.ini
+export VORON_CONFIG_FILAMENT=/Users/arrongreen/dev/3dprinters/slicer/filament_kvp_abs_voron_dsf.ini
+
+function ss-input-git-root {
+    local INPUT
+    INPUT="${1}"
+    cd "${INPUT}" || return
+    git rev-parse --show-toplevel || return
+}
+function ss-drop-prefix {
+    local FILE
+    FILE="${1}"
+    local PREFIX
+    PREFIX="${2}"
+    sed "s;${PREFIX};;" <<< "${FILE}"
+}
+function ss-input-git-sha {
+    local FILE
+    FILE="${1}"
+    local FILE_DIR
+    FILE_DIR="$(dirname "${FILE}")"
+    local GIT_ROOT
+    GIT_ROOT="$(ss-input-git-root "${FILE_DIR}")"
+    if [[ -n "${GIT_ROOT}" ]]; then
+        cd "${GIT_ROOT}" || return
+        # strip off GIT_ROOT from ${FILE}
+        local GIT_FILE_PATH
+        GIT_FILE_PATH="$(ss-drop-prefix "${FILE}" "${GIT_ROOT}/")"
+        git rev-parse "HEAD:${GIT_FILE_PATH}"
+    fi
+}
+function ss-export-gcode {
+	INPUT="${1:-${PWD}}"
+	# OUTPUT="${2:-'/tmp'}"
+    local SETTINGS
+	SETTINGS=${VORON_ABS_SETTINGS[*]}
+
+    local GIT_ROOT
+    GIT_ROOT=$(ss-input-git-root "${INPUT}")
+
+    local WORK_DIR
+    WORK_DIR="$(mktemp -d)"
+
+    local SS_EXE
+	SS_EXE="${SS_HOME}/Contents/MacOS/SuperSlicer"
+
+# SuperSlicer_2.4.58.5_2022-09-23 based on Slic3r (with GUI support)
+# https://github.com/supermerill/SuperSlicer
+
+# Usage: superslicer [ ACTIONS ] [ TRANSFORM ] [ OPTIONS ] [ file.stl ... ]
+
+# Actions:
+#  --export-3mf        Export the model(s) as 3MF.
+#  --export-amf        Export the model(s) as AMF.
+#  --export-gcode, --gcode, -g
+#                      Slice the model and export toolpaths as G-code.
+#  --export-obj        Export the model(s) as OBJ.
+#  --export-sla, --sla Slice the model and export SLA printing layers as PNG.
+#  --export-stl        Export the model(s) as STL.
+#  --gcodeviewer       Visualize an already sliced and saved G-code
+#  --help, -h          Show this help.
+#  --help-fff          Show the full list of print/G-code configuration options.
+#  --help-sla          Show the full list of SLA print configuration options.
+#  --info              Write information about the model to the console.
+#  --save ABCD         Save configuration to the specified file.
+#  --slice, -s         Slice the model as FFF or SLA based on the printer_technology configuration
+#                      value.
+
+# Transform options:
+#  --align-xy X,Y      Align the model to the given point.
+#  --center X,Y        Center the print around the given center.
+#  --cut N             Cut model at the given Z.
+#  --dont-arrange      Do not rearrange the given models before merging and keep their original XY
+#                      coordinates.
+#  --duplicate N       Multiply copies by this factor.
+#  --duplicate-grid X,Y
+#                      Multiply copies by creating a grid.
+#  --ensure-on-bed     Lift the object above the bed when it is partially below. Enabled by default,
+#                      use --no-ensure-on-bed to disable.
+#  --merge, -m         Arrange the supplied models in a plate and merge them in a single model in order
+#                      to perform actions once.
+#  --repair            Try to repair any non-manifold meshes (this option is implicitly added whenever
+#                      we need to slice the model to perform the requested action).
+#  --rotate N          Rotation angle around the Z axis in degrees.
+#  --rotate-x N        Rotation angle around the X axis in degrees.
+#  --rotate-y N        Rotation angle around the Y axis in degrees.
+#  --scale N           Scaling factor or percentage.
+#  --scale-to-fit X,Y,Z
+#                      Scale to fit the given volume.
+#  --split             Detect unconnected parts in the given model(s) and split them into separate
+#                      objects.
+
+# Other options:
+#  --config-compatibility
+#                      This version of Slic3r may not understand configurations produced by the newest
+#                      Slic3r versions. For example, newer Slic3r may extend the list of supported
+#                      firmware flavors. One may decide to bail out or to substitute an unknown value
+#                      with a default silently or verbosely. (disable, enable, enable_silent; default:
+#                      enable)
+#  --datadir ABCD      Load and store settings at the given directory. This is useful for maintaining
+#                      different profiles or including configurations from a network storage.
+#  --ignore-nonexistent-config
+#                      Do not fail if a file supplied to --load does not exist.
+#  --load ABCD         Load configuration from the specified file. It can be used more than once to
+#                      load options from multiple files.
+#  --loglevel N        Sets logging sensitivity. 0:fatal, 1:error, 2:warning, 3:info, 4:debug, 5:trace
+#                      For example. loglevel=2 logs fatal, error and warning level messages.
+#  --output ABCD, -o ABCD
+#                      The file where the output will be written (if not specified, it will be based on
+#                      the input file).
+#  --single-instance   If enabled, the command line arguments are sent to an existing instance of GUI
+#                      Slic3r, or an existing Slic3r window is activated. Overrides the
+#                      "single_instance" configuration value from application preferences.
+
+# Print options are processed in the following order:
+# 	1) Config keys from the command line, for example --fill-pattern=stars
+# 	   (highest priority, overwrites everything below)
+# 	2) Config files loaded with --load
+# 	3) Config values loaded from amf or 3mf files
+	while read -r FILE; do 
+		FILE_DIR="$(dirname "${FILE}")"                                 # the directory of where the file resides
+		NAME="$(basename "${FILE}")"                                    # raw file name
+        NAME_NE="${NAME%.*}"                                            # file name without extension
+        NAME_EXT="$(tr '[:upper:]' '[:lower:]' <<< "${NAME##*.}")"      # lcased file extension
+        FILE_SHA="$(ss-input-git-sha "${FILE}")"                        # HEAD commit sha for the specific file
+        FILE_NAME_WITH_SHA="${NAME_NE}_${FILE_SHA}.${NAME_EXT}"         # new file name including the sha
+        GIT_FILE_DIR="$(ss-drop-prefix "${FILE_DIR}" "${GIT_ROOT}/")"   # the relative GIT directory of the file
+        FILE_TEMP_DIR="${WORK_DIR}/${GIT_FILE_DIR}"                     # the temp directory where the file will be written
+        mkdir -p "${FILE_TEMP_DIR}"                                     # ensure the fill temp directory exists
+        NEW_FILE_PATH="${FILE_TEMP_DIR}/${FILE_NAME_WITH_SHA}"          # the full temp file path with the git sha
+        cp "${FILE}" "${NEW_FILE_PATH}"                                 # copy the file to the temp directory
+
+        local ARGS
+        ARGS=()
+        ARGS+=(${VORON_ABS_SETTINGS[*]})
+        # ARGS+=("--load ${VORON_CONFIG_PRINTER}")
+        # ARGS+=("--load ${VORON_CONFIG_PRINT}")
+        # ARGS+=("--load ${VORON_CONFIG_FILAMENT}")
+        ARGS+=("--output ${FILE_TEMP_DIR}")
+        ARGS+=("${NEW_FILE_PATH}")
+        ${SS_EXE} --export-3mf ${ARGS[*]}   # args cannot be quoted
+        ${SS_EXE} --export-gcode ${ARGS[*]} # args cannot be quoted
+
+        rm "${NEW_FILE_PATH}"
+	done < <(find "${INPUT}" -iname \*.stl)
+    open "${WORK_DIR}"
+}
